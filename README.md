@@ -2,7 +2,7 @@
 
 ![Logo](https://i.ibb.co/GfTxbJfC/7-edited.png)
 
-# 🎵 PrimeMusic - Advanced Lavalink Music Bot
+# 🎵 PrimeMusic - Advanced Lavalink Music Bot - 1.5.1
 
 ![Version](https://img.shields.io/badge/version-1.5.1-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
