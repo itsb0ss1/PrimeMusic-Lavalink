@@ -28,6 +28,8 @@
 
 ---
 
+Credits to [UnquizableDev](https://github.com/UnquizableDev) for developing the song recommendation system and fully refactoring the playlist menu UI/UX.
+
 ## ✨ Features
 
 ### 🎶 Music Features
@@ -132,8 +134,6 @@ npm start
 ```
 
 ---
-
-Credits to [UnquizableDev](https://github.com/UnquizableDev) for developing the song recommendation system and fully refactoring the playlist menu UI/UX.
 
 ## ⚙️ Configuration
 
