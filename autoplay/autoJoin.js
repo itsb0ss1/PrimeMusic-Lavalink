@@ -5,7 +5,9 @@
  * and a watchdog that re-joins + undeafens every 30 seconds if needed.
  */
 
+const { ActivityType } = require('discord.js');
 const colors = require('../UI/colors/colors');
+const { requesters: sharedRequesters } = require('../requesters');
 
 // ─── Target IDs ────────────────────────────────────────────────────────────────
 const TARGET_GUILD_ID   = '1091967599442669581';
@@ -110,21 +112,25 @@ async function startAutoPlay(client) {
     isLoading = true;
 
     try {
+        // Guard: riffy must be initialised
+        if (!client.riffy) {
+            console.warn(`${colors.cyan}[ AUTO-DJ ]${colors.reset} ${colors.yellow}client.riffy not ready yet – will retry via watchdog.${colors.reset}`);
+            return;
+        }
+
         const guild = client.guilds.cache.get(TARGET_GUILD_ID);
         if (!guild) {
             console.error(`${colors.cyan}[ AUTO-DJ ]${colors.reset} ${colors.red}Guild ${TARGET_GUILD_ID} not found – is the bot a member?${colors.reset}`);
-            isLoading = false;
             return;
         }
 
         const voiceChannel = guild.channels.cache.get(TARGET_VOICE_ID);
         if (!voiceChannel) {
             console.error(`${colors.cyan}[ AUTO-DJ ]${colors.reset} ${colors.red}Voice channel ${TARGET_VOICE_ID} not found.${colors.reset}`);
-            isLoading = false;
             return;
         }
 
-        // Pick a text channel (first one the bot can speak in) for now-playing cards
+        // Pick a text channel the bot can speak in for now-playing cards
         const textChannel =
             guild.channels.cache.find(
                 (c) =>
@@ -138,16 +144,16 @@ async function startAutoPlay(client) {
             await client.lavalinkManager.ensureNodeAvailable().catch(() => {});
         }
 
-        // Destroy any existing stale player for this guild
-        const existingPlayer = client.riffy.players.get(TARGET_GUILD_ID);
-        if (existingPlayer && existingPlayer.destroyed) {
+        // Reuse existing live player, or destroy a stale one and create fresh
+        let player = client.riffy.players.get(TARGET_GUILD_ID);
+        if (player && player.destroyed) {
             client.riffy.players.delete(TARGET_GUILD_ID);
+            player = null;
         }
 
-        // Create / reuse player
-        let player = client.riffy.players.get(TARGET_GUILD_ID);
-        if (!player || player.destroyed) {
-            player = client.riffy.createPlayer({
+        if (!player) {
+            // Riffy uses createConnection(), same as the /play command
+            player = client.riffy.createConnection({
                 guildId:      TARGET_GUILD_ID,
                 voiceChannel: TARGET_VOICE_ID,
                 textChannel:  textChannel?.id || TARGET_VOICE_ID,
@@ -156,53 +162,40 @@ async function startAutoPlay(client) {
             });
         }
 
-        // Connect if not already
+        if (!player) {
+            console.error(`${colors.cyan}[ AUTO-DJ ]${colors.reset} ${colors.red}createConnection returned undefined – Lavalink node may not be connected yet.${colors.reset}`);
+            return;
+        }
+
+        // Small delay to let Discord voice state settle if we just connected
         if (!player.connected) {
-            player.connect();
-            // Small delay to let Discord voice state settle
             await new Promise((r) => setTimeout(r, 1500));
         }
 
-        // Undeafen self if needed
+        // Undeafen / unmute self if needed (non-fatal)
         try {
             const me = guild.members.me;
-            if (me && (me.voice.deaf || me.voice.selfDeaf)) {
-                await me.voice.setDeaf(false).catch(() => {});
-            }
-            if (me && me.voice.mute) {
-                await me.voice.setMute(false).catch(() => {});
-            }
-        } catch (_) { /* permissions issue – non-fatal */ }
+            if (me?.voice?.deaf || me?.voice?.selfDeaf) await me.voice.setDeaf(false).catch(() => {});
+            if (me?.voice?.mute)                        await me.voice.setMute(false).catch(() => {});
+        } catch (_) {}
 
-        // If already playing, just ensure queue is not empty
-        if (player.playing && player.queue.length > 0) {
-            isLoading = false;
-            return;
-        }
+        // Already playing with tracks queued – nothing to do
+        if (player.playing && player.queue.length > 0) return;
 
         console.log(`${colors.cyan}[ AUTO-DJ ]${colors.reset} ${colors.yellow}Loading BLACKPINK playlist…${colors.reset}`);
         const tracks = await resolvePlaylist(client);
 
         if (!tracks.length) {
             console.error(`${colors.cyan}[ AUTO-DJ ]${colors.reset} ${colors.red}No tracks resolved – giving up.${colors.reset}`);
-            isLoading = false;
             return;
         }
 
-        // Import requesters map so cards show the auto-DJ label
-        let requesters;
-        try {
-            ({ requesters } = require('../commands/music/play'));
-        } catch (_) {
-            requesters = new Map();
-        }
+        tagTracks(tracks, sharedRequesters);
 
-        tagTracks(tracks, requesters);
-
-        // Enable queue loop so it plays forever
+        // Loop the queue so it plays forever
         player.setLoop('queue');
 
-        // Clear existing queue and load all tracks
+        // Load all shuffled tracks into the queue
         player.queue.clear();
         for (const track of tracks) {
             player.queue.add(track);
