@@ -130,14 +130,10 @@ async function startAutoPlay(client) {
             return;
         }
 
-        // Pick a text channel the bot can speak in for now-playing cards
-        const textChannel =
-            guild.channels.cache.find(
-                (c) =>
-                    c.isTextBased() &&
-                    !c.isThread() &&
-                    c.permissionsFor(guild.members.me)?.has(['SendMessages', 'EmbedLinks'])
-            ) || null;
+        // Text channel locked to the target voice channel — embeds are suppressed
+        // for this guild in player.js anyway, but we set it correctly for any
+        // transient error messages Riffy might still send internally.
+        const textChannel = { id: TARGET_VOICE_ID };
 
         // Ensure a Lavalink node is ready
         if (client.lavalinkManager) {
