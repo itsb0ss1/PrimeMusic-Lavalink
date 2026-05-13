@@ -1,6 +1,9 @@
 const { Riffy, Player } = require("riffy");
 const { ContainerBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, PermissionsBitField, MessageFlags, MediaGalleryBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder } = require("discord.js");
-const { requesters } = require("./commands/music/play");
+const { requesters } = require("./requesters");
+
+// Auto-DJ guild — suppress now-playing embeds here (status manager handles display)
+const AUTO_DJ_GUILD_ID = '1091967599442669581';
 const { EnhancedMusicCard } = require("./utils/musicCard");
 const config = require("./config.js");
 const { getEmoji, getButtonEmoji } = require('./UI/emojis/emoji');
@@ -540,6 +543,103 @@ async function initializePlayer(client) {
         } catch (error) {
             const lang = getLangSync();
             console.error(lang.console?.player?.errorSavingHistory || "Error saving to history:", error);
+        }
+
+        // Auto-DJ guild: send embed to the designated text channel using the
+        // track thumbnail URL directly (no file attachment needed).
+        if (guildId === AUTO_DJ_GUILD_ID) {
+            try {
+                const autoDjTextChannelId = '1239193792993693717';
+                const autoDjChannel = client.channels.cache.get(autoDjTextChannelId);
+                if (!autoDjChannel) return;
+
+                await cleanupPreviousTrackMessages(autoDjChannel, guildId);
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                // Use direct thumbnail URL — no attachment upload required
+                let thumbnailURL = track.info.thumbnail || '';
+                if ((!thumbnailURL || !thumbnailURL.startsWith('http')) && track.info.uri) {
+                    // Derive maxres YouTube thumbnail from URI if needed
+                    const ytMatch = track.info.uri.match(/[?&]v=([^&]+)/);
+                    if (ytMatch) thumbnailURL = `https://img.youtube.com/vi/${ytMatch[1]}/maxresdefault.jpg`;
+                }
+
+                let cardBuffer = null;
+                if (useGeneratedSongCard) {
+                    try {
+                        cardBuffer = await musicCard.generateCard({
+                            thumbnailURL,
+                            trackURI: track.info.uri,
+                            songTitle: track.info.title,
+                            songArtist: track.info.author || 'Unknown Artist',
+                            trackRequester: requesters.get(trackUri) || '🎀 Auto-DJ • BLACKPINK',
+                            isPlaying: true,
+                            showVisualizer: config.showVisualizer !== false,
+                            currentPositionMs: 0,
+                            totalDurationMs: track.info.length || 0,
+                        });
+                    } catch (_) { /* card generation failed — fall back to thumbnail URL */ }
+                }
+
+                const autoDjRequester = requesters.get(trackUri) || '🎀 Auto-DJ • BLACKPINK';
+                const commandMentionMap = await getCommandMentionMap(client);
+                const actionRows = buildPlayerActionRows(player.paused, player.loop, guildActiveFilter.get(guildId) || null);
+
+                let attachment = null;
+                let imageUrl = thumbnailURL || null;
+
+                if (cardBuffer && cardBuffer.length > 0) {
+                    attachment = new AttachmentBuilder(cardBuffer, { name: 'song-banner.png' });
+                    imageUrl = 'attachment://song-banner.png';
+                }
+
+                const canAttach = autoDjChannel.permissionsFor(autoDjChannel.guild.members.me)
+                    ?.has(PermissionsBitField.Flags.AttachFiles);
+
+                if (attachment && !canAttach) {
+                    // Can't attach — fall back to direct URL thumbnail
+                    attachment = null;
+                    imageUrl = thumbnailURL || null;
+                }
+
+                const nowPlayingContainer = buildNowPlayingContainer(
+                    track,
+                    autoDjRequester,
+                    t,
+                    config.showProgressBar !== false ? createProgressBar(0, track.info.length) : null,
+                    0,
+                    imageUrl,
+                    actionRows,
+                    { paused: player.paused, loop: player.loop, currentPosition: 0, queueLength: player.queue.length, commandMentionMap }
+                );
+
+                const message = await sendMessageWithPermissionsCheck(
+                    autoDjChannel,
+                    [nowPlayingContainer],
+                    attachment && canAttach ? attachment : null
+                );
+
+                if (message) {
+                    const sentMediaUrl = message.attachments?.first()?.url || null;
+                    if (sentMediaUrl || cardBuffer) {
+                        setTrackMediaCache(guildId, track.info.uri, sentMediaUrl, cardBuffer);
+                    } else {
+                        clearTrackMediaCache(guildId);
+                    }
+
+                    if (!guildTrackMessages.has(guildId)) guildTrackMessages.set(guildId, []);
+                    guildTrackMessages.get(guildId).push({ messageId: message.id, channelId: autoDjChannel.id, type: 'track' });
+                    nowPlayingMessages.set(guildId, { messageId: message.id, channelId: autoDjChannel.id, player, trackUri: track.info.uri });
+
+                    const intervalId = startProgressUpdates(client, guildId, message, player, track);
+                    if (intervalId) progressUpdateIntervals.set(guildId, intervalId);
+                    setupCollector(client, player, autoDjChannel, message);
+                }
+            } catch (autoDjErr) {
+                const langSync = getLangSync();
+                console.error(langSync.console?.player?.errorMusicCard?.replace('{message}', autoDjErr.message) || `Auto-DJ embed error: ${autoDjErr.message}`);
+            }
+            return;
         }
 
         try {
