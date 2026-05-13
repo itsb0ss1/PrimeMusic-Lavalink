@@ -14,7 +14,8 @@ class StatusManager {
         
         return {
             playing: player.playing,
-            title: player.current?.info?.title || null
+            title:  player.current?.info?.title  || null,
+            author: player.current?.info?.author || null,
         };
     }
 
@@ -23,7 +24,7 @@ class StatusManager {
             const playerInfo = this.getPlayerInfo(guildId);
             
             if (playerInfo && playerInfo.playing && playerInfo.title) {
-                await this.setPlayingStatus(playerInfo.title);
+                await this.setPlayingStatus(playerInfo.title, playerInfo.author);
                 await this.setVoiceChannelStatus(guildId, playerInfo.title);
             } else {
                 await this.setDefaultStatus();
@@ -34,11 +35,14 @@ class StatusManager {
         }
     }
 
-    async setPlayingStatus(trackTitle) {
+    async setPlayingStatus(trackTitle, trackAuthor = null) {
         this.stopCurrentStatus();
         this.isPlaying = true;
         
-        const activity = `🎵 ${trackTitle}`;
+        // Format: "ARTIST - SONG" when artist is available, otherwise "🎵 SONG"
+        const activity = trackAuthor
+            ? `${trackAuthor} - ${trackTitle}`
+            : `🎵 ${trackTitle}`;
      
         await this.client.user.setPresence({
             activities: [{
@@ -48,6 +52,7 @@ class StatusManager {
             status: 'online'
         });
         
+        // Re-assert every 30 s in case Discord silently drops the presence update
         this.currentInterval = setInterval(async () => {
             if (this.isPlaying) {
                 await this.client.user.setPresence({
