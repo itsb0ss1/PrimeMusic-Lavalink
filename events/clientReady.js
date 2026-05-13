@@ -3,6 +3,7 @@ const { ActivityType } = require("discord.js");
 const colors = require('../UI/colors/colors');
 const { getLangSync } = require('../utils/languageLoader.js');
 const StatusManager = require('../utils/statusManager.js');
+const { initAutoJoin } = require('../autoplay/autoJoin');   // ← NEW
 
 module.exports = async (client) => {
     try {
@@ -33,8 +34,6 @@ module.exports = async (client) => {
             }
         }
         
-
-       
     } catch (error) {
         const lang = getLangSync();
         console.error(`${colors.cyan}[ REST ]${colors.reset} ${colors.red}${lang.console?.events?.rest?.commandsFailed || 'Failed to register commands ❌'}${colors.reset}`);
@@ -48,5 +47,10 @@ module.exports = async (client) => {
     await client.statusManager.setDefaultStatus();
 
     client.errorLog = config.errorLog;
-};
 
+    // ── Auto-join BLACKPINK radio ─────────────────────────────────────────────
+    // Runs after a short delay so Lavalink nodes have time to connect.
+    initAutoJoin(client).catch((err) => {
+        console.error(`${colors.cyan}[ AUTO-DJ ]${colors.reset} ${colors.red}initAutoJoin failed: ${err.message}${colors.reset}`);
+    });
+};
