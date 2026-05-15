@@ -37,6 +37,13 @@ module.exports = {
   host: "ge-02.vortexa.cloud",
   port: 11050,
   secure: false
-}
+   },
+   {
+  name: "lavalink.jirayu.net",
+  password: "youshallnotpass",
+  host: "lavalink.jirayu.net",
+  port: 13592,
+  secure: false
+},
   ]
 }
