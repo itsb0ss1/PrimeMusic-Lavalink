@@ -44,6 +44,13 @@ module.exports = {
   host: "lavalink.jirayu.net",
   port: 13592,
   secure: false
+   },
+   {
+  name: "lavalink.triniumhost.com",
+  password: "kirito",
+  host: "lavalink.triniumhost.com",
+  port: 2333,
+  secure: false
 },
   ]
 }
