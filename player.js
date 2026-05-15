@@ -545,8 +545,9 @@ async function initializePlayer(client) {
             console.error(lang.console?.player?.errorSavingHistory || "Error saving to history:", error);
         }
 
-        // Auto-DJ guild: send embed to the designated text channel using the
-        // track thumbnail URL directly (no file attachment needed).
+        // Auto-DJ guild: send embed to the designated text channel.
+        // We never use attachment:// here — only direct https:// thumbnail URLs
+        // so Discord can always unfurl the image without a file upload.
         if (guildId === AUTO_DJ_GUILD_ID) {
             try {
                 const autoDjTextChannelId = '1239193792993693717';
@@ -556,51 +557,18 @@ async function initializePlayer(client) {
                 await cleanupPreviousTrackMessages(autoDjChannel, guildId);
                 await new Promise(resolve => setTimeout(resolve, 500));
 
-                // Use direct thumbnail URL — no attachment upload required
+                // Build a direct https:// thumbnail URL — never attachment://
                 let thumbnailURL = track.info.thumbnail || '';
-                if ((!thumbnailURL || !thumbnailURL.startsWith('http')) && track.info.uri) {
-                    // Derive maxres YouTube thumbnail from URI if needed
+                if (!thumbnailURL.startsWith('http') && track.info.uri) {
                     const ytMatch = track.info.uri.match(/[?&]v=([^&]+)/);
                     if (ytMatch) thumbnailURL = `https://img.youtube.com/vi/${ytMatch[1]}/maxresdefault.jpg`;
                 }
-
-                let cardBuffer = null;
-                if (useGeneratedSongCard) {
-                    try {
-                        cardBuffer = await musicCard.generateCard({
-                            thumbnailURL,
-                            trackURI: track.info.uri,
-                            songTitle: track.info.title,
-                            songArtist: track.info.author || 'Unknown Artist',
-                            trackRequester: requesters.get(trackUri) || '🎀 Auto-DJ • BLACKPINK',
-                            isPlaying: true,
-                            showVisualizer: config.showVisualizer !== false,
-                            currentPositionMs: 0,
-                            totalDurationMs: track.info.length || 0,
-                        });
-                    } catch (_) { /* card generation failed — fall back to thumbnail URL */ }
-                }
+                // Final fallback: no image rather than a broken attachment reference
+                const imageUrl = thumbnailURL.startsWith('http') ? thumbnailURL : null;
 
                 const autoDjRequester = requesters.get(trackUri) || '🎀 Auto-DJ • BLACKPINK';
                 const commandMentionMap = await getCommandMentionMap(client);
                 const actionRows = buildPlayerActionRows(player.paused, player.loop, guildActiveFilter.get(guildId) || null);
-
-                let attachment = null;
-                let imageUrl = thumbnailURL || null;
-
-                if (cardBuffer && cardBuffer.length > 0) {
-                    attachment = new AttachmentBuilder(cardBuffer, { name: 'song-banner.png' });
-                    imageUrl = 'attachment://song-banner.png';
-                }
-
-                const canAttach = autoDjChannel.permissionsFor(autoDjChannel.guild.members.me)
-                    ?.has(PermissionsBitField.Flags.AttachFiles);
-
-                if (attachment && !canAttach) {
-                    // Can't attach — fall back to direct URL thumbnail
-                    attachment = null;
-                    imageUrl = thumbnailURL || null;
-                }
 
                 const nowPlayingContainer = buildNowPlayingContainer(
                     track,
@@ -608,24 +576,17 @@ async function initializePlayer(client) {
                     t,
                     config.showProgressBar !== false ? createProgressBar(0, track.info.length) : null,
                     0,
-                    imageUrl,
+                    imageUrl,   // always https:// or null — never attachment://
                     actionRows,
                     { paused: player.paused, loop: player.loop, currentPosition: 0, queueLength: player.queue.length, commandMentionMap }
                 );
 
-                const message = await sendMessageWithPermissionsCheck(
-                    autoDjChannel,
-                    [nowPlayingContainer],
-                    attachment && canAttach ? attachment : null
-                );
+                // No attachment argument — image is embedded via URL in the MediaGallery
+                const message = await sendMessageWithPermissionsCheck(autoDjChannel, [nowPlayingContainer], null);
 
                 if (message) {
-                    const sentMediaUrl = message.attachments?.first()?.url || null;
-                    if (sentMediaUrl || cardBuffer) {
-                        setTrackMediaCache(guildId, track.info.uri, sentMediaUrl, cardBuffer);
-                    } else {
-                        clearTrackMediaCache(guildId);
-                    }
+                    if (imageUrl) setTrackMediaCache(guildId, track.info.uri, imageUrl, null);
+                    else clearTrackMediaCache(guildId);
 
                     if (!guildTrackMessages.has(guildId)) guildTrackMessages.set(guildId, []);
                     guildTrackMessages.get(guildId).push({ messageId: message.id, channelId: autoDjChannel.id, type: 'track' });
@@ -637,7 +598,7 @@ async function initializePlayer(client) {
                 }
             } catch (autoDjErr) {
                 const langSync = getLangSync();
-                console.error(langSync.console?.player?.errorMusicCard?.replace('{message}', autoDjErr.message) || `Auto-DJ embed error: ${autoDjErr.message}`);
+                console.error(`Auto-DJ embed error: ${autoDjErr.message}`);
             }
             return;
         }
