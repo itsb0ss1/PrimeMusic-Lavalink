@@ -31,5 +31,12 @@ module.exports = {
       port: 2010,
       secure: false
     }
+    {
+  name: "GlaceYT",
+  password: "glace",
+  host: "ge-02.vortexa.cloud",
+  port: 11050,
+  secure: false
+}
   ]
 }
